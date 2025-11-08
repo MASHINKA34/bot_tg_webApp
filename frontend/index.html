@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clicker Game</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- Шапка с балансом -->
+        <div class="header">
+            <div class="balance-card">
+                <div class="balance-label">💰 Баланс</div>
+                <div class="balance-amount" id="balance">0</div>
+            </div>
+            <div class="stats-mini">
+                <div class="stat-item">
+                    <span class="stat-label">🔥 Сила клика:</span>
+                    <span class="stat-value" id="click-power">1</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">📈 Кликов:</span>
+                    <span class="stat-value" id="total-clicks">0</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Навигация -->
+        <div class="tabs">
+            <button class="tab active" data-tab="clicker">🎮 Кликер</button>
+            <button class="tab" data-tab="farms">🏭 Фермы</button>
+            <button class="tab" data-tab="leaderboard">🏆 Топ</button>
+        </div>
+
+        <!-- Контент вкладок -->
+        <div class="content">
+            <!-- Вкладка кликера -->
+            <div class="tab-content active" id="clicker-tab">
+                <div class="clicker-section">
+                    <button class="click-button" id="click-btn">
+                        <div class="click-icon">💎</div>
+                        <div class="click-text">КЛИКАЙ!</div>
+                    </button>
+                    
+                    <div class="click-effect" id="click-effect"></div>
+                    
+                    <div class="upgrade-section">
+                        <div class="upgrade-card">
+                            <div class="upgrade-header">
+                                <span class="upgrade-title">⚡ Улучшить клик</span>
+                                <span class="upgrade-level">Ур. <span id="click-level">1</span></span>
+                            </div>
+                            <div class="upgrade-stats">
+                                <div class="upgrade-stat">
+                                    <span>Текущая сила:</span>
+                                    <span id="current-power">1</span>
+                                </div>
+                                <div class="upgrade-stat">
+                                    <span>Новая сила:</span>
+                                    <span id="next-power" class="highlight">2</span>
+                                </div>
+                            </div>
+                            <button class="upgrade-btn" id="upgrade-btn">
+                                <span>Купить за </span>
+                                <span id="upgrade-cost">100</span>
+                                <span> 💰</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="daily-bonus-card" id="daily-card">
+                        <button class="daily-btn" id="daily-btn">
+                            🎁 Забрать ежедневный бонус
+                        </button>
+                        <div class="daily-info">
+                            <span>🔥 Стрик: <span id="daily-streak">0</span> дней</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Вкладка ферм -->
+            <div class="tab-content" id="farms-tab">
+                <div class="farms-section">
+                    <h2 class="section-title">🏪 Магазин ферм</h2>
+                    <div class="shop-list">
+                        <div class="shop-item">
+                            <div class="shop-icon">🌾</div>
+                            <div class="shop-info">
+                                <div class="shop-name">Мини-ферма</div>
+                                <div class="shop-income">💵 50/час</div>
+                            </div>
+                            <button class="buy-btn" data-type="small_farm" data-cost="500">
+                                500 💰
+                            </button>
+                        </div>
+                        <div class="shop-item">
+                            <div class="shop-icon">🏭</div>
+                            <div class="shop-info">
+                                <div class="shop-name">Завод</div>
+                                <div class="shop-income">💵 250/час</div>
+                            </div>
+                            <button class="buy-btn" data-type="factory" data-cost="2000">
+                                2000 💰
+                            </button>
+                        </div>
+                        <div class="shop-item">
+                            <div class="shop-icon">🏢</div>
+                            <div class="shop-info">
+                                <div class="shop-name">Корпорация</div>
+                                <div class="shop-income">💵 1500/час</div>
+                            </div>
+                            <button class="buy-btn" data-type="corporation" data-cost="10000">
+                                10000 💰
+                            </button>
+                        </div>
+                    </div>
+
+                    <h2 class="section-title">🏭 Мои фермы</h2>
+                    <div class="my-farms" id="my-farms">
+                        <div class="empty-state">У вас пока нет ферм</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Вкладка лидерборда -->
+            <div class="tab-content" id="leaderboard-tab">
+                <div class="leaderboard-section">
+                    <h2 class="section-title">🏆 Топ-10 игроков</h2>
+                    <div class="leaderboard-list" id="leaderboard-list">
+                        <div class="loading">Загрузка...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
