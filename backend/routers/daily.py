@@ -14,7 +14,6 @@ async def claim_daily(telegram_id: int, db: AsyncSession = Depends(get_session))
     user = result.scalar_one_or_none()
     
     if not user:
-        # Автоматически создаём пользователя
         user = User(
             telegram_id=telegram_id,
             balance=0,
@@ -30,7 +29,12 @@ async def claim_daily(telegram_id: int, db: AsyncSession = Depends(get_session))
     if user.last_daily_claim:
         time_since = (now - user.last_daily_claim).total_seconds() / 3600
         if time_since < 24:
-            return {"success": False, "error": "Бонус уже забран"}
+            hours_left = 24 - time_since
+            return {
+                "success": False, 
+                "error": "Бонус уже забран",
+                "time_left_hours": hours_left
+            }
         
         if time_since > 48:
             user.daily_streak = 0
@@ -49,4 +53,26 @@ async def claim_daily(telegram_id: int, db: AsyncSession = Depends(get_session))
         "bonus": bonus,
         "streak": user.daily_streak,
         "balance": user.balance
+    }
+
+@router.get("/status/{telegram_id}")
+async def get_daily_status(telegram_id: int, db: AsyncSession = Depends(get_session)):
+    result = await db.execute(select(User).where(User.telegram_id == telegram_id))
+    user = result.scalar_one_or_none()
+    
+    if not user or not user.last_daily_claim:
+        return {
+            "available": True,
+            "streak": user.daily_streak if user else 0,
+            "time_left_seconds": 0
+        }
+    
+    now = datetime.utcnow()
+    time_since = (now - user.last_daily_claim).total_seconds()
+    time_left = max(0, (24 * 3600) - time_since)
+    
+    return {
+        "available": time_left == 0,
+        "streak": user.daily_streak,
+        "time_left_seconds": int(time_left)
     }

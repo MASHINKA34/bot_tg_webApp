@@ -22,7 +22,6 @@ async def get_farms(telegram_id: int, db: AsyncSession = Depends(get_session)):
     user = user_result.scalar_one_or_none()
     
     if not user:
-        # Автоматически создаём пользователя
         user = User(
             telegram_id=telegram_id,
             balance=0,
@@ -42,18 +41,13 @@ async def get_farms(telegram_id: int, db: AsyncSession = Depends(get_session)):
     
     farms_list = []
     for farm in farms:
-        # Проверяем активность
         is_active = time_since_activity < settings.FARM_AFK_LIMIT_HOURS
         
-        # Считаем время производства
         time_since_collect = (now - farm.last_collected).total_seconds() / 3600
         
-        # Если был AFK больше лимита - считаем только за активное время
         if time_since_activity >= settings.FARM_AFK_LIMIT_HOURS:
-            # Производство было только до момента AFK
             production_time = max(0, time_since_collect - (time_since_activity - settings.FARM_AFK_LIMIT_HOURS))
         else:
-            # Всё время активно
             production_time = time_since_collect
         
         accumulated = int(farm.income_per_hour * production_time)
@@ -78,7 +72,6 @@ async def buy_farm(request: BuyFarmRequest, db: AsyncSession = Depends(get_sessi
     user = user_result.scalar_one_or_none()
     
     if not user:
-        # Автоматически создаём пользователя
         user = User(
             telegram_id=request.telegram_id,
             balance=0,
@@ -93,26 +86,47 @@ async def buy_farm(request: BuyFarmRequest, db: AsyncSession = Depends(get_sessi
     
     if user.balance < farm_info["cost"]:
         return {"success": False, "error": "Недостаточно средств"}
-    
-    new_farm = Farm(
-        user_id=user.id,
-        farm_type=request.farm_type,
-        name=farm_info["name"],
-        level=1,
-        income_per_hour=farm_info["income"]
+
+    existing_farm_result = await db.execute(
+        select(Farm).where(Farm.user_id == user.id, Farm.farm_type == request.farm_type)
     )
+    existing_farm = existing_farm_result.scalar_one_or_none()
     
-    user.balance -= farm_info["cost"]
-    user.last_activity = datetime.utcnow()
-    
-    db.add(new_farm)
-    await db.commit()
-    
-    return {
-        "success": True,
-        "farm_id": new_farm.id,
-        "balance": user.balance
-    }
+    if existing_farm:
+
+        existing_farm.level += 1
+        existing_farm.income_per_hour = int(farm_info["income"] * existing_farm.level)
+        user.balance -= farm_info["cost"]
+        user.last_activity = datetime.utcnow()
+        await db.commit()
+        
+        return {
+            "success": True,
+            "farm_id": existing_farm.id,
+            "balance": user.balance,
+            "level": existing_farm.level
+        }
+    else:
+        new_farm = Farm(
+            user_id=user.id,
+            farm_type=request.farm_type,
+            name=farm_info["name"],
+            level=1,
+            income_per_hour=farm_info["income"]
+        )
+        
+        user.balance -= farm_info["cost"]
+        user.last_activity = datetime.utcnow()
+        
+        db.add(new_farm)
+        await db.commit()
+        
+        return {
+            "success": True,
+            "farm_id": new_farm.id,
+            "balance": user.balance,
+            "level": 1
+        }
 
 @router.post("/collect/{farm_id}")
 async def collect_farm(farm_id: int, telegram_id: int, db: AsyncSession = Depends(get_session)):
@@ -120,7 +134,6 @@ async def collect_farm(farm_id: int, telegram_id: int, db: AsyncSession = Depend
     user = user_result.scalar_one_or_none()
     
     if not user:
-        # Автоматически создаём пользователя
         user = User(
             telegram_id=telegram_id,
             balance=0,

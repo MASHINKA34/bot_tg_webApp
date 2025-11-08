@@ -3,7 +3,7 @@ from typing import Optional, List
 
 class ClickRequest(BaseModel):
     telegram_id: int
-    clicks: int = 1  # По умолчанию 1 клик, но можно отправить несколько
+    clicks: int = 1  
 
 class UserStats(BaseModel):
     balance: int

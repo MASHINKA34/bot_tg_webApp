@@ -7,7 +7,6 @@ from backend.routers import clicker, farms, daily, leaderboard
 import logging
 import time
 
-# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -16,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("🚀 Запуск приложения...")
+    logger.info("🚀 Запуск приложения")
     await init_db()
     logger.info("✅ База данных инициализирована")
     yield
@@ -24,7 +23,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Clicker Web App", lifespan=lifespan)
 
-# Middleware для логирования запросов
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start_time = time.time()

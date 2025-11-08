@@ -21,7 +21,6 @@ class User(Base):
     clicks_this_second: Mapped[int] = mapped_column(Integer, default=0)
     last_activity: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     
-    # Ð•Ð¶ÐµÐ´Ð½ÐµÐ²Ð½Ñ‹Ðµ Ð±Ð¾Ð½ÑƒÑÑ‹
     last_daily_claim: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     daily_streak: Mapped[int] = mapped_column(Integer, default=0)
     

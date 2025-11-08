@@ -25,7 +25,6 @@ async def process_click(request: ClickRequest, db: AsyncSession = Depends(get_se
         db.add(user)
         await db.flush()
     
-    # Обрабатываем батч кликов (может быть 1 или много)
     clicks_count = request.clicks
     earned = user.click_power * clicks_count
     
@@ -50,7 +49,6 @@ async def get_stats(telegram_id: int, db: AsyncSession = Depends(get_session)):
     user = result.scalar_one_or_none()
     
     if not user:
-        # Автоматически создаём пользователя
         user = User(
             telegram_id=telegram_id,
             balance=0,
@@ -63,7 +61,6 @@ async def get_stats(telegram_id: int, db: AsyncSession = Depends(get_session)):
     
     upgrade_cost = int(settings.CLICK_UPGRADE_BASE_COST * (settings.CLICK_UPGRADE_MULTIPLIER ** (user.click_level - 1)))
     
-    # Ранг
     all_users = await db.execute(select(User).order_by(User.balance.desc()))
     users_list = all_users.scalars().all()
     rank = next((i+1 for i, u in enumerate(users_list) if u.telegram_id == telegram_id), 0)
@@ -83,7 +80,6 @@ async def upgrade_click(request: ClickRequest, db: AsyncSession = Depends(get_se
     user = result.scalar_one_or_none()
     
     if not user:
-        # Автоматически создаём пользователя
         user = User(
             telegram_id=request.telegram_id,
             balance=0,

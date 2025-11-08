@@ -6,7 +6,6 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///./clicker.db"
     SECRET_KEY: str
     
-    # Игровые настройки
     CLICK_VALUE: int = 1
     MAX_CLICKS_PER_SECOND: int = 100
     CLICK_UPGRADE_BASE_COST: int = 100
