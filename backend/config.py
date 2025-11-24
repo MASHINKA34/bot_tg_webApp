@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     DAILY_BONUS_BASE: int = 100
     DAILY_BONUS_STREAK_MULTIPLIER: float = 1.2
     
+    REFERRAL_BONUS: int = 500 
+    REFERRAL_BONUS_FOR_NEW_USER: int = 250  
+    
     class Config:
         env_file = ".env"
 

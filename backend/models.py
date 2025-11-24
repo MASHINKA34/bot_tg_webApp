@@ -24,6 +24,11 @@ class User(Base):
     last_daily_claim: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     daily_streak: Mapped[int] = mapped_column(Integer, default=0)
     
+    referrer_id: Mapped[int] = mapped_column(BigInteger, nullable=True)  
+    referral_code: Mapped[str] = mapped_column(String, unique=True, nullable=True, index=True)  
+    referral_count: Mapped[int] = mapped_column(Integer, default=0) 
+    referral_earnings: Mapped[int] = mapped_column(Integer, default=0)  
+    
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 class Farm(Base):

@@ -3,7 +3,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from backend.database import init_db
-from backend.routers import clicker, farms, daily, leaderboard
+from backend.routers import clicker, farms, daily, leaderboard, referral
 import logging
 import time
 
@@ -48,6 +48,7 @@ app.include_router(clicker.router, prefix="/api")
 app.include_router(farms.router, prefix="/api")
 app.include_router(daily.router, prefix="/api")
 app.include_router(leaderboard.router, prefix="/api")
+app.include_router(referral.router, prefix="/api")
 
 app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
 

@@ -28,6 +28,7 @@
 
         <div class="tabs">
             <button class="tab active" data-tab="clicker">🎮 Кликер</button>
+            <button class="tab" data-tab="friends">👥 Друзья</button>
             <button class="tab" data-tab="farms">🏭 Фермы</button>
             <button class="tab" data-tab="leaderboard">🏆 Топ</button>
         </div>
@@ -73,6 +74,61 @@
                         <div class="daily-info">
                             <span>🔥 Стрик: <span id="daily-streak">0</span> дней</span>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-content" id="friends-tab">
+                <div class="friends-section">
+                    <h2 class="section-title">👥 Пригласи друзей</h2>
+                    
+                    <div class="referral-card">
+                        <div class="referral-header">
+                            <div class="referral-icon">🎁</div>
+                            <div class="referral-text">
+                                <div class="referral-title">Получай бонусы</div>
+                                <div class="referral-desc">За каждого приглашённого друга</div>
+                            </div>
+                        </div>
+                        
+                        <div class="referral-stats">
+                            <div class="referral-stat">
+                                <div class="stat-label">Ваш заработок:</div>
+                                <div class="stat-value" id="referral-earnings">0 💰</div>
+                            </div>
+                            <div class="referral-stat">
+                                <div class="stat-label">Приглашено друзей:</div>
+                                <div class="stat-value" id="referral-count">0</div>
+                            </div>
+                        </div>
+
+                        <div class="referral-bonus-info">
+                            <div class="bonus-item">
+                                <span>💰 Вы получите:</span>
+                                <span class="highlight" id="bonus-amount">500</span>
+                            </div>
+                            <div class="bonus-item">
+                                <span>🎁 Друг получит:</span>
+                                <span class="highlight">250</span>
+                            </div>
+                        </div>
+                        
+                        <div class="referral-code-box">
+                            <div class="code-label">Ваш реферальный код:</div>
+                            <div class="code-display" id="referral-code">LOADING...</div>
+                        </div>
+                        
+                        <button class="invite-btn" id="invite-btn">
+                            📤 Пригласить друга
+                        </button>
+                        <button class="copy-btn" id="copy-link-btn">
+                            📋 Скопировать ссылку
+                        </button>
+                    </div>
+
+                    <h2 class="section-title" style="margin-top: 30px;">👨‍👩‍👧‍👦 Ваши друзья</h2>
+                    <div class="friends-list" id="friends-list">
+                        <div class="empty-state">Вы ещё никого не пригласили</div>
                     </div>
                 </div>
             </div>

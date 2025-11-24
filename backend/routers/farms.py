@@ -93,7 +93,6 @@ async def buy_farm(request: BuyFarmRequest, db: AsyncSession = Depends(get_sessi
     existing_farm = existing_farm_result.scalar_one_or_none()
     
     if existing_farm:
-
         existing_farm.level += 1
         existing_farm.income_per_hour = int(farm_info["income"] * existing_farm.level)
         user.balance -= farm_info["cost"]

@@ -30,3 +30,19 @@ class LeaderboardPlayer(BaseModel):
     username: str
     balance: int
     total_clicks: int
+
+class ReferralInfo(BaseModel):
+    referral_code: str
+    referral_count: int
+    referral_earnings: int
+    bonus_per_referral: int
+
+class ReferralStats(BaseModel):
+    telegram_id: int
+    username: str
+    balance: int
+    joined_at: str
+
+class ActivateReferralRequest(BaseModel):
+    telegram_id: int
+    referral_code: str
