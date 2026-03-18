@@ -6,8 +6,13 @@ const userId = tg.initDataUnsafe?.user?.id || 123456;
 
 let clickBuffer = 0;
 let syncTimeout = null;
-const SYNC_DELAY = 1000; 
+const SYNC_DELAY = 1000;
 let isSyncing = false;
+let isBlockedByPlatform = false;       // флаг блокировки платформой
+let loadingStats = false;              // защита от параллельных вызовов loadUserStats
+let blockedSince = 0;                  // время (ms) когда стала активна блокировка
+const MIN_BLOCK_DURATION = 8000;       // минимум 8 сек блокировки (защита от ложного снятия)
+let statsDebounceTimer = null;         // дебаунс для частых viewportChanged
 
 let dailyStatusData = null; 
 let dailyTimerInterval = null; 
@@ -27,25 +32,39 @@ let appState = {
 };
 
 async function init() {
-    await loadUserStats();
+    // Кнопка отключена до загрузки статистики (предотвращает гонку)
+    const clickBtn = document.getElementById('click-btn');
+    if (clickBtn) clickBtn.disabled = true;
+
+    await loadUserStats();  // устанавливает isBlockedByPlatform и разблокирует кнопку
+
     await loadDailyStatus();
     await checkReferralCode();
     setupEventListeners();
     setupTabs();
+
+    // Периодическая проверка статуса блокировки (каждые 5 сек)
+    setInterval(async () => {
+        await loadUserStats();
+    }, 5000);
     
     document.addEventListener('visibilitychange', async () => {
         if (!document.hidden) {
-            console.log('📱 Приложение снова активно - обновляем daily status');
+            console.log('📱 Приложение снова активно — перепроверяем блокировку и daily');
+            await loadUserStats();   // ← сбрасывает/восстанавливает блокировку
             await loadDailyStatus();
         }
     });
-    
+
     if (tg.onEvent) {
-        tg.onEvent('viewportChanged', async () => {
-            if (tg.isExpanded) {
-                console.log('📱 WebApp развёрнут - обновляем daily status');
-                await loadDailyStatus();
-            }
+        // Дебаунс: viewportChanged стреляет очень часто — ждём 500ms после последнего события
+        tg.onEvent('viewportChanged', () => {
+            if (statsDebounceTimer) clearTimeout(statsDebounceTimer);
+            statsDebounceTimer = setTimeout(async () => {
+                statsDebounceTimer = null;
+                console.log('📱 viewportChanged (debounced) — перепроверяем блокировку');
+                await loadUserStats();
+            }, 500);
         });
     }
 }
@@ -89,19 +108,39 @@ async function activateReferral(code) {
 }
 
 async function loadUserStats() {
+    // Защита от параллельных вызовов (viewportChanged стреляет очень часто)
+    if (loadingStats) return;
+    loadingStats = true;
     try {
         const response = await fetch(`${API_URL}/clicker/stats/${userId}`);
         const data = await response.json();
-        
+
         appState.balance = data.balance;
         appState.totalClicks = data.total_clicks;
         appState.clickPower = data.click_power;
         appState.clickLevel = data.click_level;
         appState.upgradeCost = data.upgrade_cost;
-        
+
+        // Синхронизировать состояние блокировки с сервером
+        if (data.is_locked) {
+            // Сервер говорит — заблокировано (MC активен)
+            setBlockedState(true, data.locked_by || 'minecraft');
+        } else {
+            // Сервер говорит — разблокировано.
+            // Не снимать блокировку раньше MIN_BLOCK_DURATION после её установки.
+            const now = Date.now();
+            if (!isBlockedByPlatform || (now - blockedSince) >= MIN_BLOCK_DURATION) {
+                setBlockedState(false, null);
+            } else {
+                console.log(`⏳ Блокировка ещё активна (${Math.round((now - blockedSince)/1000)}s < ${MIN_BLOCK_DURATION/1000}s)`);
+            }
+        }
+
         updateUI();
     } catch (error) {
         console.error('Ошибка загрузки статистики:', error);
+    } finally {
+        loadingStats = false;
     }
 }
 
@@ -170,26 +209,34 @@ function updateUI() {
 }
 
 async function handleClick(event) {
+    // Если заблокированы платформой — блокировать любым способом
+    if (isBlockedByPlatform) {
+        event.preventDefault();
+        event.stopPropagation();
+        console.warn('⛔ Клик отклонён: платформа заблокирована');
+        return;
+    }
+
     const button = event.currentTarget;
-    
+
     if (tg.HapticFeedback) {
         tg.HapticFeedback.impactOccurred('light');
     }
-    
+
     button.style.transform = 'scale(0.95)';
     setTimeout(() => button.style.transform = 'scale(1)', 100);
-    
+
     showClickEffect(event);
-    
+
     clickBuffer++;
     appState.balance += appState.clickPower;
     appState.totalClicks += 1;
     updateUI();
-    
+
     if (syncTimeout) {
         clearTimeout(syncTimeout);
     }
-    
+
     syncTimeout = setTimeout(() => {
         syncClicks();
     }, SYNC_DELAY);
@@ -234,12 +281,20 @@ async function syncClicks() {
         const data = await response.json();
         
         if (data.success) {
+            // Успех — снять блокировку, применить серверный баланс
+            setBlockedState(false, null);
             appState.balance = data.balance;
             appState.totalClicks = data.total_clicks;
             updateUI();
-            console.log(`Клики синхронизированы. Баланс: ${data.balance}`);
+            console.log(`✅ Клики синхронизированы. Баланс: ${data.balance}`);
+        } else if (data.blocked_by) {
+            // Заблокированы платформой — показать баннер, откатить баланс
+            console.warn(`⛔ Клики заблокированы платформой: ${data.blocked_by}`);
+            setBlockedState(true, data.blocked_by);
+            await loadUserStats();  // откатить баланс до серверного значения
         } else {
-            console.error('Ошибка сервера:', data.error);
+            // Другая ошибка — вернуть клики в буфер
+            console.error('❌ Ошибка сервера:', data.error);
             clickBuffer += clicksToSync;
         }
     } catch (error) {
@@ -263,14 +318,6 @@ window.addEventListener('beforeunload', async () => {
         }).catch(err => console.error('Ошибка финальной синхронизации:', err));
     }
 });
-
-if (tg.onEvent) {
-    tg.onEvent('viewportChanged', () => {
-        if (!tg.isExpanded && clickBuffer > 0) {
-            syncClicks();
-        }
-    });
-}
 
 async function handleUpgrade() {
     if (appState.balance < appState.upgradeCost) return;
@@ -551,6 +598,56 @@ function setupTabs() {
 
 function showNotification(message, type = 'info') {
     tg.showAlert(message);
+}
+
+/**
+ * Центральная функция управления состоянием блокировки платформой.
+ * Обновляет флаг, баннер и кнопку одним вызовом.
+ */
+function setBlockedState(blocked, blockedBy) {
+    const wasBlocked = isBlockedByPlatform;
+    isBlockedByPlatform = blocked;
+
+    const banner = document.getElementById('platform-block-banner');
+    const platformName = document.getElementById('block-platform-name');
+    const btn = document.getElementById('click-btn');
+
+    if (blocked) {
+        // Запомнить время блокировки (только при первом переходе в заблокированное состояние)
+        if (!wasBlocked) {
+            blockedSince = Date.now();
+            console.warn(`⛔ Блокировка активирована: ${blockedBy} (${new Date(blockedSince).toLocaleTimeString()})`);
+        }
+        // Показать баннер
+        if (banner) {
+            if (platformName) {
+                platformName.textContent = (blockedBy === 'minecraft') ? 'Minecraft ⛏️' : 'Telegram 📱';
+            }
+            banner.style.display = 'block';
+        }
+        // Заблокировать кнопку
+        if (btn) {
+            btn.disabled = true;
+            btn.style.opacity = '0.4';
+            btn.style.cursor = 'not-allowed';
+            btn.style.pointerEvents = 'none';
+        }
+        // Сбросить буфер кликов
+        clickBuffer = 0;
+        if (syncTimeout) { clearTimeout(syncTimeout); syncTimeout = null; }
+    } else {
+        blockedSince = 0;
+        // Скрыть баннер
+        if (banner) banner.style.display = 'none';
+        // Разблокировать кнопку
+        if (btn) {
+            btn.disabled = false;
+            btn.style.opacity = '1';
+            btn.style.cursor = 'pointer';
+            btn.style.pointerEvents = 'auto';
+        }
+        if (wasBlocked) console.log('✅ Блокировка снята');
+    }
 }
 
 function setupEventListeners() {

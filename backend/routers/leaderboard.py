@@ -1,24 +1,24 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from backend.database import get_session
-from backend.models import User
-from backend.schemas import LeaderboardPlayer
+from fastapi import APIRouter
 from typing import List
+from backend import db_queries
+from backend.schemas import LeaderboardPlayer
 
 router = APIRouter(prefix="/leaderboard", tags=["leaderboard"])
 
+
 @router.get("/", response_model=List[LeaderboardPlayer])
-async def get_leaderboard(limit: int = 10, db: AsyncSession = Depends(get_session)):
-    result = await db.execute(select(User).order_by(User.balance.desc()).limit(limit))
-    users = result.scalars().all()
-    
+async def get_leaderboard(limit: int = 10):
+    """
+    Топ игроков по количеству печенек.
+    Включает и Minecraft-игроков и TG-игроков (общая таблица).
+    """
+    rows = await db_queries.get_leaderboard(limit)
     return [
         LeaderboardPlayer(
-            telegram_id=user.telegram_id,
-            username=user.username or f"Player_{user.telegram_id}",
-            balance=user.balance,
-            total_clicks=user.total_clicks
+            telegram_id=row.get("telegram_id"),
+            username=row.get("name") or f"Player_{row.get('telegram_id', '?')}",
+            balance=row["cookies"],
+            total_clicks=row["clicker_clicks"],
         )
-        for user in users
+        for row in rows
     ]

@@ -1,9 +1,11 @@
 from pydantic import BaseModel
 from typing import Optional, List
 
+
 class ClickRequest(BaseModel):
     telegram_id: int
-    clicks: int = 1  
+    clicks: int = 1
+
 
 class UserStats(BaseModel):
     balance: int
@@ -13,6 +15,7 @@ class UserStats(BaseModel):
     upgrade_cost: int
     rank: int
 
+
 class FarmResponse(BaseModel):
     id: int
     name: str
@@ -21,15 +24,18 @@ class FarmResponse(BaseModel):
     accumulated: int
     is_active: bool
 
+
 class BuyFarmRequest(BaseModel):
     telegram_id: int
     farm_type: str
 
+
 class LeaderboardPlayer(BaseModel):
-    telegram_id: int
+    telegram_id: Optional[int] = None
     username: str
     balance: int
     total_clicks: int
+
 
 class ReferralInfo(BaseModel):
     referral_code: str
@@ -37,11 +43,13 @@ class ReferralInfo(BaseModel):
     referral_earnings: int
     bonus_per_referral: int
 
+
 class ReferralStats(BaseModel):
-    telegram_id: int
+    telegram_id: Optional[int] = None
     username: str
     balance: int
     joined_at: str
+
 
 class ActivateReferralRequest(BaseModel):
     telegram_id: int

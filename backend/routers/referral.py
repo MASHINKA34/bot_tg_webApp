@@ -1,123 +1,94 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from datetime import datetime
-from backend.database import get_session
-from backend.models import User
+from fastapi import APIRouter, HTTPException
+from typing import List
+from backend import db_queries
 from backend.schemas import ReferralInfo, ReferralStats, ActivateReferralRequest
 from backend.config import settings
-from typing import List
-import hashlib
+from backend.db_queries import generate_referral_code
+from backend.database import get_pool
+import logging
 
 router = APIRouter(prefix="/referral", tags=["referral"])
+logger = logging.getLogger(__name__)
 
-def generate_referral_code(telegram_id: int) -> str:
-    hash_input = f"{telegram_id}{settings.SECRET_KEY}"
-    return hashlib.md5(hash_input.encode()).hexdigest()[:8].upper()
 
 @router.get("/info/{telegram_id}", response_model=ReferralInfo)
-async def get_referral_info(telegram_id: int, db: AsyncSession = Depends(get_session)):
-    result = await db.execute(select(User).where(User.telegram_id == telegram_id))
-    user = result.scalar_one_or_none()
-    
-    if not user:
-        referral_code = generate_referral_code(telegram_id)
-        user = User(
-            telegram_id=telegram_id,
-            balance=0,
-            total_clicks=0,
-            click_level=1,
-            click_power=settings.CLICK_VALUE,
-            referral_code=referral_code
-        )
-        db.add(user)
-        await db.commit()
-        await db.refresh(user)
+async def get_referral_info(telegram_id: int):
+    """Получить реферальный код и статистику."""
+    player = await db_queries.get_or_create_player(telegram_id)
 
-    if not user.referral_code:
-        user.referral_code = generate_referral_code(telegram_id)
-        await db.commit()
-    
+    ref_code = player.get("referral_code")
+    if not ref_code:
+        ref_code = generate_referral_code(telegram_id, settings.SECRET_KEY)
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE cookieclicker_players SET referral_code = $1 WHERE uuid = $2",
+                ref_code,
+                player["uuid"],
+            )
+
     return ReferralInfo(
-        referral_code=user.referral_code,
-        referral_count=user.referral_count,
-        referral_earnings=user.referral_earnings,
-        bonus_per_referral=settings.REFERRAL_BONUS
+        referral_code=ref_code,
+        referral_count=player.get("referral_count") or 0,
+        referral_earnings=player.get("referral_earnings") or 0,
+        bonus_per_referral=settings.REFERRAL_BONUS,
     )
+
 
 @router.get("/list/{telegram_id}", response_model=List[ReferralStats])
-async def get_referrals(telegram_id: int, db: AsyncSession = Depends(get_session)):
-    result = await db.execute(
-        select(User).where(User.referrer_id == telegram_id)
-    )
-    referrals = result.scalars().all()
-    
+async def get_referrals(telegram_id: int):
+    """Список приглашённых игроков."""
+    player = await db_queries.get_player_by_telegram_id(telegram_id)
+    if not player:
+        return []
+
+    referrals = await db_queries.get_referrals_of(player["uuid"])
     return [
         ReferralStats(
-            telegram_id=ref.telegram_id,
-            username=ref.username or f"Player_{ref.telegram_id}",
-            balance=ref.balance,
-            joined_at=ref.created_at.strftime("%d.%m.%Y")
+            telegram_id=ref.get("telegram_id"),
+            username=ref.get("name") or f"Player_{ref.get('telegram_id', '?')}",
+            balance=ref["cookies"],
+            joined_at=(
+                ref["last_activity"].strftime("%d.%m.%Y")
+                if ref.get("last_activity")
+                else "—"
+            ),
         )
         for ref in referrals
     ]
 
+
 @router.post("/activate")
-async def activate_referral(request: ActivateReferralRequest, db: AsyncSession = Depends(get_session)):
-    user_result = await db.execute(
-        select(User).where(User.telegram_id == request.telegram_id)
-    )
-    user = user_result.scalar_one_or_none()
-    
-    if not user:
-        referral_code = generate_referral_code(request.telegram_id)
-        user = User(
-            telegram_id=request.telegram_id,
-            balance=0,
-            total_clicks=0,
-            click_level=1,
-            click_power=settings.CLICK_VALUE,
-            referral_code=referral_code
-        )
-        db.add(user)
-        await db.flush()
+async def activate_referral(request: ActivateReferralRequest):
+    """Использовать реферальный код."""
+    user = await db_queries.get_or_create_player(request.telegram_id)
+    user_uuid = user["uuid"]
 
-    if user.referrer_id is not None:
-        return {
-            "success": False,
-            "error": "Вы уже использовали реферальный код"
-        }
+    if user.get("referrer_uuid"):
+        return {"success": False, "error": "Вы уже использовали реферальный код"}
 
-    referrer_result = await db.execute(
-        select(User).where(User.referral_code == request.referral_code)
-    )
-    referrer = referrer_result.scalar_one_or_none()
-    
+    referrer = await db_queries.get_player_by_referral_code(request.referral_code)
     if not referrer:
-        return {
-            "success": False,
-            "error": "Неверный реферальный код"
-        }
+        return {"success": False, "error": "Неверный реферальный код"}
 
-    if referrer.telegram_id == request.telegram_id:
-        return {
-            "success": False,
-            "error": "Нельзя использовать свой реферальный код"
-        }
-    
-    user.referrer_id = referrer.telegram_id
+    if referrer["uuid"] == user_uuid:
+        return {"success": False, "error": "Нельзя использовать свой реферальный код"}
 
-    referrer.referral_count += 1
-    referrer.balance += settings.REFERRAL_BONUS
-    referrer.referral_earnings += settings.REFERRAL_BONUS
-    
-    user.balance += settings.REFERRAL_BONUS_FOR_NEW_USER
-    
-    await db.commit()
-    
+    await db_queries.activate_referral(
+        user_uuid=user_uuid,
+        referrer_uuid=referrer["uuid"],
+        user_bonus=settings.REFERRAL_BONUS_FOR_NEW_USER,
+        referrer_bonus=settings.REFERRAL_BONUS,
+    )
+
+    logger.info(
+        f"Реферал: {request.telegram_id} → {referrer.get('telegram_id')}, "
+        f"бонусы: user={settings.REFERRAL_BONUS_FOR_NEW_USER}, referrer={settings.REFERRAL_BONUS}"
+    )
+
     return {
         "success": True,
         "referrer_bonus": settings.REFERRAL_BONUS,
         "user_bonus": settings.REFERRAL_BONUS_FOR_NEW_USER,
-        "referrer_username": referrer.username or f"Player_{referrer.telegram_id}"
+        "referrer_username": referrer.get("name") or f"Player_{referrer.get('telegram_id', '?')}",
     }

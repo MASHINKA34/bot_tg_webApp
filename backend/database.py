@@ -1,14 +1,28 @@
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from backend.models import Base
-from backend.config import settings
+import asyncpg
+import logging
 
-engine = create_async_engine(settings.DATABASE_URL, echo=False)
-async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
+logger = logging.getLogger(__name__)
 
-async def init_db():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+_pool: asyncpg.Pool | None = None
 
-async def get_session() -> AsyncSession:
-    async with async_session_maker() as session:
-        yield session
+
+async def init_db(dsn: str) -> None:
+    """Инициализировать пул соединений к PostgreSQL."""
+    global _pool
+    _pool = await asyncpg.create_pool(dsn, min_size=2, max_size=10)
+    logger.info("✅ asyncpg pool создан")
+
+
+async def close_db() -> None:
+    """Закрыть пул при остановке приложения."""
+    global _pool
+    if _pool:
+        await _pool.close()
+        logger.info("🛑 asyncpg pool закрыт")
+
+
+def get_pool() -> asyncpg.Pool:
+    """Вернуть активный пул соединений."""
+    if _pool is None:
+        raise RuntimeError("Database pool is not initialized. Call init_db() first.")
+    return _pool

@@ -1,162 +1,225 @@
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text, select
-from backend.models import Player
-from datetime import datetime
-from typing import Optional, Dict
+"""
+events.py — система событий (Golden Cookie, Cookie Explosion).
+Полностью на Python, состояние хранится в active_events TEXT(JSON) в БД.
+Синхронизировано с логикой Minecraft плагина.
+"""
+
 import json
 import random
 import logging
+from datetime import datetime, timezone
+from typing import Optional, Dict
+
+from backend.database import get_pool
 
 logger = logging.getLogger(__name__)
 
+
+# ─────────────────────────────────────────────
+# Константы (из MC config.yml)
+# ─────────────────────────────────────────────
+GOLDEN_COOKIE_CHANCE = 10000        # 1 из 10 000
+COOKIE_EXPLOSION_CHANCE = 5000      # 1 из 5 000
+GOLDEN_DURATION_SECONDS = 60
+EXPLOSION_DURATION_SECONDS = 30
+COOKIE_AMOUNT = 20
+COOKIES_PER_COOKIE_MULTIPLIER = 10
+PER_CLICK_MULTIPLIER = 2
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_event(active_events_str: Optional[str]) -> Optional[Dict]:
+    """Распарсить JSON строку события."""
+    if not active_events_str:
+        return None
+    try:
+        return json.loads(active_events_str)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def _is_expired(event: Dict) -> bool:
+    """Проверить, истёк ли срок события."""
+    try:
+        expires_at = datetime.fromisoformat(event["expires_at"])
+        return datetime.now(timezone.utc) >= expires_at
+    except (KeyError, ValueError):
+        return True
+
+
+async def _save_event(player_uuid: str, event: Optional[Dict]) -> None:
+    """Сохранить (или очистить) событие в БД."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE cookieclicker_players SET active_events = $1 WHERE uuid = $2",
+            json.dumps(event) if event else None,
+            player_uuid,
+        )
+
+
 class EventManager:
     """
-    Event Manager - СИНХРОНИЗИРОВАНО с MC плагином
-    
+    Менеджер событий — синхронизирован с MC плагином.
+
     События:
-    - Golden Cookie: x2 к кликам на 60 секунд (шанс 1/10000)
-    - Cookie Explosion: 20 печенек по x10 награды за каждую (шанс 1/5000)
+    - Golden Cookie  : x2 к кликам на 60 сек  (шанс 1/10 000)
+    - Cookie Explosion: 20 печенек по x10 за каждую (шанс 1/5 000)
     """
-    
-    # Настройки из MC config.yml
-    GOLDEN_COOKIE_CHANCE = 10000      # 1 из 10000
-    COOKIE_EXPLOSION_CHANCE = 5000    # 1 из 5000
-    GOLDEN_DURATION_SECONDS = 60
-    EXPLOSION_DURATION_SECONDS = 30
-    COOKIE_AMOUNT = 20
-    COOKIES_PER_COOKIE_MULTIPLIER = 10
-    PER_CLICK_MULTIPLIER = 2
-    
+
+    PER_CLICK_MULTIPLIER = PER_CLICK_MULTIPLIER
+
+    # ─────────────────────────────────────────
+    # Получить активное событие
+    # ─────────────────────────────────────────
+
     @staticmethod
-    async def check_event_trigger(player_id: int, db: AsyncSession) -> Optional[Dict]:
+    async def get_active_event(player_uuid: str) -> Optional[Dict]:
         """
-        Проверить триггер события при клике (как в MC)
-        
-        Returns:
-            Dict с данными события или None
+        Вернуть активное событие игрока.
+        Автоматически очищает истёкшие события.
         """
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT active_events FROM cookieclicker_players WHERE uuid = $1",
+                player_uuid,
+            )
+        if not row:
+            return None
+
+        event = _parse_event(row["active_events"])
+        if event is None:
+            return None
+
+        if _is_expired(event):
+            await _save_event(player_uuid, None)
+            return None
+
+        return event
+
+    # ─────────────────────────────────────────
+    # Триггер случайного события при клике
+    # ─────────────────────────────────────────
+
+    @staticmethod
+    async def check_event_trigger(player_uuid: str) -> Optional[Dict]:
+        """
+        Проверить случайный триггер события.
+        Вызывается после каждого клика.
+        """
+        # Сначала проверяем — нет ли уже активного события
+        existing = await EventManager.get_active_event(player_uuid)
+        if existing:
+            return None
+
         try:
-            # Golden Cookie (1/10000 шанс)
-            if random.randint(1, EventManager.GOLDEN_COOKIE_CHANCE) == 1:
-                result = await db.execute(
-                    text("SELECT activate_golden_cookie(:player_id)"),
-                    {"player_id": player_id}
-                )
-                event_data = result.scalar()
-                
-                logger.info(f"🌟 Golden Cookie activated for player {player_id}")
-                
+            # Golden Cookie (1/10 000)
+            if random.randint(1, GOLDEN_COOKIE_CHANCE) == 1:
+                from datetime import timedelta
+                now = datetime.now(timezone.utc)
+                event = {
+                    "type": "golden_cookie",
+                    "started_at": now.isoformat(),
+                    "expires_at": (now + timedelta(seconds=GOLDEN_DURATION_SECONDS)).isoformat(),
+                    "multiplier": PER_CLICK_MULTIPLIER,
+                }
+                await _save_event(player_uuid, event)
+                logger.info(f"🌟 Golden Cookie активирован для {player_uuid}")
                 return {
                     "type": "golden_cookie",
-                    "duration": EventManager.GOLDEN_DURATION_SECONDS,
-                    "multiplier": EventManager.PER_CLICK_MULTIPLIER,
-                    "message": "🌟 ЗОЛОТОЕ ПЕЧЕНЬЕ! x2 к кликам на 60 секунд!"
+                    "duration": GOLDEN_DURATION_SECONDS,
+                    "multiplier": PER_CLICK_MULTIPLIER,
+                    "message": "🌟 ЗОЛОТОЕ ПЕЧЕНЬЕ! x2 к кликам на 60 секунд!",
                 }
-            
-            # Cookie Explosion (1/5000 шанс)
-            elif random.randint(1, EventManager.COOKIE_EXPLOSION_CHANCE) == 1:
-                result = await db.execute(
-                    text("SELECT activate_cookie_explosion(:player_id, :cookie_count)"),
-                    {
-                        "player_id": player_id,
-                        "cookie_count": EventManager.COOKIE_AMOUNT
-                    }
-                )
-                event_data = result.scalar()
-                
-                logger.info(f"💥 Cookie Explosion activated for player {player_id}")
-                
+
+            # Cookie Explosion (1/5 000)
+            elif random.randint(1, COOKIE_EXPLOSION_CHANCE) == 1:
+                from datetime import timedelta
+                now = datetime.now(timezone.utc)
+                event = {
+                    "type": "cookie_explosion",
+                    "started_at": now.isoformat(),
+                    "expires_at": (now + timedelta(seconds=EXPLOSION_DURATION_SECONDS)).isoformat(),
+                    "cookies_left": COOKIE_AMOUNT,
+                    "cookie_value": COOKIES_PER_COOKIE_MULTIPLIER,
+                }
+                await _save_event(player_uuid, event)
+                logger.info(f"💥 Cookie Explosion активирован для {player_uuid}")
                 return {
                     "type": "cookie_explosion",
-                    "duration": EventManager.EXPLOSION_DURATION_SECONDS,
-                    "cookies_total": EventManager.COOKIE_AMOUNT,
-                    "cookies_left": EventManager.COOKIE_AMOUNT,
-                    "message": f"💥 ВЗРЫВ ПЕЧЕНЕК! Собери {EventManager.COOKIE_AMOUNT} печенек!"
+                    "duration": EXPLOSION_DURATION_SECONDS,
+                    "cookies_total": COOKIE_AMOUNT,
+                    "cookies_left": COOKIE_AMOUNT,
+                    "message": f"💥 ВЗРЫВ ПЕЧЕНЕК! Собери {COOKIE_AMOUNT} печенек!",
                 }
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error checking event trigger: {e}", exc_info=True)
-            return None
-    
+
+        except Exception as exc:
+            logger.error(f"Ошибка триггера события: {exc}", exc_info=True)
+
+        return None
+
+    # ─────────────────────────────────────────
+    # Собрать печеньку из Cookie Explosion
+    # ─────────────────────────────────────────
+
     @staticmethod
-    async def get_active_event(player_id: int, db: AsyncSession) -> Optional[Dict]:
+    async def collect_explosion_cookie(player_uuid: str) -> Dict:
         """
-        Получить активное событие игрока
-        
-        Returns:
-            Dict с данными события или None
+        Собрать одну печеньку из Cookie Explosion.
+        Начисляет reward = per_click * COOKIES_PER_COOKIE_MULTIPLIER.
         """
-        try:
-            result = await db.execute(
-                text("SELECT check_active_events(:player_id)"),
-                {"player_id": player_id}
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT active_events, per_click FROM cookieclicker_players WHERE uuid = $1",
+                player_uuid,
             )
-            event_json = result.scalar()
-            
-            if event_json:
-                return dict(event_json)
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error getting active event: {e}", exc_info=True)
-            return None
-    
-    @staticmethod
-    async def is_golden_cookie_active(player_id: int, db: AsyncSession) -> bool:
-        """
-        Проверить активно ли Golden Cookie событие
-        """
-        event = await EventManager.get_active_event(player_id, db)
-        return event is not None and event.get("type") == "golden_cookie"
-    
-    @staticmethod
-    async def collect_explosion_cookie(player_id: int, db: AsyncSession) -> Dict:
-        """
-        Собрать печеньку из Cookie Explosion
-        
-        Returns:
-            {
-                "success": bool,
-                "reward": int,
-                "cookies_left": int,
-                "error": str (если success=False)
-            }
-        """
-        try:
-            result = await db.execute(
-                text("SELECT collect_explosion_cookie(:player_id)"),
-                {"player_id": player_id}
+
+        if not row:
+            return {"success": False, "error": "Игрок не найден"}
+
+        event = _parse_event(row["active_events"])
+        if not event or event.get("type") != "cookie_explosion":
+            return {"success": False, "error": "Нет активного Cookie Explosion"}
+
+        if _is_expired(event):
+            await _save_event(player_uuid, None)
+            return {"success": False, "error": "Событие истекло"}
+
+        cookies_left = event.get("cookies_left", 0)
+        if cookies_left <= 0:
+            await _save_event(player_uuid, None)
+            return {"success": False, "error": "Все печеньки уже собраны"}
+
+        # Начислить награду
+        reward = row["per_click"] * COOKIES_PER_COOKIE_MULTIPLIER
+        cookies_left -= 1
+
+        if cookies_left == 0:
+            # Событие завершено
+            await _save_event(player_uuid, None)
+        else:
+            event["cookies_left"] = cookies_left
+            await _save_event(player_uuid, event)
+
+        # Начислить монеты
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE cookieclicker_players SET cookies = cookies + $1 WHERE uuid = $2",
+                reward,
+                player_uuid,
             )
-            result_json = result.scalar()
-            
-            await db.commit()
-            
-            if result_json:
-                return dict(result_json)
-            
-            return {"success": False, "error": "Unknown error"}
-            
-        except Exception as e:
-            logger.error(f"Error collecting explosion cookie: {e}", exc_info=True)
-            return {"success": False, "error": str(e)}
-    
+
+        return {"success": True, "reward": reward, "cookies_left": cookies_left}
+
+    # ─────────────────────────────────────────
+    # Очистить событие
+    # ─────────────────────────────────────────
+
     @staticmethod
-    async def clear_event(player_id: int, db: AsyncSession) -> None:
-        """
-        Очистить активное событие (когда истек срок)
-        """
-        try:
-            result = await db.execute(
-                select(Player).where(Player.id == player_id)
-            )
-            player = result.scalar_one_or_none()
-            
-            if player:
-                player.active_events = None
-                await db.commit()
-                
-        except Exception as e:
-            logger.error(f"Error clearing event: {e}", exc_info=True)
+    async def clear_event(player_uuid: str) -> None:
+        await _save_event(player_uuid, None)
